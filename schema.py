@@ -1,8 +1,10 @@
 import re
 from enum import Enum
 from datetime import date
-from typing import Literal, Optional, List, Dict, Any, TypedDict
+from typing import Literal, Optional, List, Dict, Any, TypedDict, Annotated, Sequence
 from pydantic import BaseModel, Field, field_validator, EmailStr, HttpUrl
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 # Enums for better type safety
@@ -85,8 +87,6 @@ class WorkExperience(BaseModel):
     skills_used: List[str] = Field(default_factory=list, description="Skills utilized in role")
     skills_learned: List[str] = Field(default_factory=list, description="Skills acquired in role")
     technologies: List[str] = Field(default_factory=list, description="Technologies used")
-    industry: Optional[str] = Field(None, description="Company industry")
-    company_size: Optional[str] = Field(None, description="Company size range")
 
     @field_validator("end_date")
     def validate_end_date(cls, v, values):
@@ -182,7 +182,6 @@ class JobRequirement(BaseModel):
 
 class CompanyInfo(BaseModel):
     name: str = Field(..., description="Company name")
-    industry: Optional[str] = Field(None, description="Company industry")
     size: Optional[str] = Field(None, description="Company size")
     location: Optional[str] = Field(None, description="Company location")
     website: Optional[HttpUrl] = Field(None, description="Company website")
@@ -268,7 +267,7 @@ class RecruiterQuestion(BaseModel):
         return self.confidence >= threshold
 
 
-# State management for LangGraph (keeping TypedDict for LangGraph compatibility)
+# State management for LangGraph - Base state without messages
 class ApplicationState(TypedDict):
     resume_text: str
     job_description_text: str
@@ -280,6 +279,11 @@ class ApplicationState(TypedDict):
     recruiter_answers: Optional[List[RecruiterQuestion]]
     current_step: str
     errors: List[str]
+
+
+# Extended state for LangGraph with message handling
+class LangGraphApplicationState(ApplicationState):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
 class ApplicationResult(BaseModel):

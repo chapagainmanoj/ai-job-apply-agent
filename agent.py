@@ -1,11 +1,11 @@
 import re
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Annotated, Sequence
 from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+from langchain.chat_models import init_chat_model
+from langgraph.graph.message import add_messages
 from datetime import datetime
-
-from anthropic import Anthropic
-# from langchain.chat_models import init_chat_model
 
 from schema import (
     ApplicationState,
@@ -18,22 +18,27 @@ from schema import (
 )
 
 
+# Updated State class for LangGraph with message handling
+class LangGraphApplicationState(ApplicationState):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+
+
 class ResumeJobApplicationSystem:
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, api_key: str, model: str = "anthropic:claude-3-5-sonnet-latest"):
         """
-        Initialize the system with Claude AI integration
+        Initialize the system with Claude AI integration via LangGraph
 
         Args:
-            api_key: Anthropic API key
-            model: Claude model to use (default: claude-sonnet-4-20250514)
+            api_key: Anthropic API key (set as environment variable)
+            model: Claude model to use (default: anthropic:claude-3-5-sonnet-latest)
         """
-        self.client = Anthropic(api_key=api_key)
-        self.model = model
+        # Initialize the LangChain Anthropic model
+        self.model = init_chat_model(model, api_key=api_key, timeout=200)
         self.graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow"""
-        workflow = StateGraph(ApplicationState)
+        workflow = StateGraph(LangGraphApplicationState)
 
         # Add nodes
         workflow.add_node("parse_resume", self.parse_resume_node)
@@ -56,23 +61,23 @@ class ResumeJobApplicationSystem:
 
         return workflow.compile()
 
-    def _call_claude(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 4000) -> str:
-        """Make a call to Claude API"""
+    def _call_claude(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Make a call to Claude API via LangChain"""
         try:
-            messages = [{"role": "user", "content": prompt}]
-
-            kwargs = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
+            messages = []
 
             if system_prompt:
-                kwargs["system"] = system_prompt
+                messages.append(SystemMessage(content=system_prompt))
 
-            response = self.client.messages.create(**kwargs)
-            return response.content[0].text
+            messages.append(HumanMessage(content=prompt))
+
+            response = self.model.invoke(messages)
+            return response.content
         except Exception as e:
             print(f"Claude API error: {e}")
             raise
 
-    def parse_resume_node(self, state: ApplicationState) -> ApplicationState:
+    def parse_resume_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Parse resume text into structured Pydantic model using Claude"""
         try:
             resume_text = state["resume_text"]
@@ -83,15 +88,19 @@ class ResumeJobApplicationSystem:
 
             state["parsed_resume"] = validated_resume
             state["current_step"] = "resume_parsed"
+
+            # Add message for tracking
+            state["messages"] = [AIMessage(content="✅ Resume parsing completed with Claude AI + Pydantic validation")]
             print("✅ Resume parsing completed with Claude AI + Pydantic validation")
 
         except Exception as e:
             state["errors"].append(f"Resume parsing error: {str(e)}")
+            state["messages"] = [AIMessage(content=f"❌ Resume parsing failed: {e}")]
             print(f"❌ Resume parsing failed: {e}")
 
         return state
 
-    def parse_job_description_node(self, state: ApplicationState) -> ApplicationState:
+    def parse_job_description_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Parse job description into structured Pydantic model using Claude"""
         try:
             job_desc_text = state["job_description_text"]
@@ -102,15 +111,21 @@ class ResumeJobApplicationSystem:
 
             state["parsed_job_description"] = validated_job
             state["current_step"] = "job_description_parsed"
+
+            # Update messages
+            new_message = AIMessage(content="✅ Job description parsing completed with Claude AI + Pydantic validation")
+            state["messages"] = state.get("messages", []) + [new_message]
             print("✅ Job description parsing completed with Claude AI + Pydantic validation")
 
         except Exception as e:
             state["errors"].append(f"Job description parsing error: {str(e)}")
+            error_message = AIMessage(content=f"❌ Job description parsing failed: {e}")
+            state["messages"] = state.get("messages", []) + [error_message]
             print(f"❌ Job description parsing failed: {e}")
 
         return state
 
-    def analyze_skill_match_node(self, state: ApplicationState) -> ApplicationState:
+    def analyze_skill_match_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Analyze skill matching with Claude AI and Pydantic models"""
         try:
             resume = state["parsed_resume"]
@@ -126,15 +141,21 @@ class ResumeJobApplicationSystem:
 
             state["skill_match_analysis"] = validated_analysis
             state["current_step"] = "skill_analysis_completed"
+
+            # Update messages
+            new_message = AIMessage(content="✅ Skill matching analysis completed with Claude AI + Pydantic validation")
+            state["messages"] = state.get("messages", []) + [new_message]
             print("✅ Skill matching analysis completed with Claude AI + Pydantic validation")
 
         except Exception as e:
             state["errors"].append(f"Skill analysis error: {str(e)}")
+            error_message = AIMessage(content=f"❌ Skill analysis failed: {e}")
+            state["messages"] = state.get("messages", []) + [error_message]
             print(f"❌ Skill analysis failed: {e}")
 
         return state
 
-    def generate_cover_letter_node(self, state: ApplicationState) -> ApplicationState:
+    def generate_cover_letter_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Generate tailored cover letter with Claude AI and Pydantic model"""
         try:
             resume = state["parsed_resume"]
@@ -151,15 +172,21 @@ class ResumeJobApplicationSystem:
 
             state["cover_letter"] = validated_cover_letter
             state["current_step"] = "cover_letter_generated"
+
+            # Update messages
+            new_message = AIMessage(content="✅ Cover letter generated with Claude AI + Pydantic validation")
+            state["messages"] = state.get("messages", []) + [new_message]
             print("✅ Cover letter generated with Claude AI + Pydantic validation")
 
         except Exception as e:
             state["errors"].append(f"Cover letter generation error: {str(e)}")
+            error_message = AIMessage(content=f"❌ Cover letter generation failed: {e}")
+            state["messages"] = state.get("messages", []) + [error_message]
             print(f"❌ Cover letter generation failed: {e}")
 
         return state
 
-    def handle_recruiter_questions_node(self, state: ApplicationState) -> ApplicationState:
+    def handle_recruiter_questions_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Handle recruiter questions with Claude AI and Pydantic models"""
         try:
             if state.get("recruiter_questions"):
@@ -173,21 +200,28 @@ class ResumeJobApplicationSystem:
                 validated_answers = [RecruiterQuestion.model_validate(answer) for answer in answers]
 
                 state["recruiter_answers"] = validated_answers
+                new_message = AIMessage(content="✅ Recruiter questions answered with Claude AI + Pydantic validation")
                 print("✅ Recruiter questions answered with Claude AI + Pydantic validation")
             else:
+                new_message = AIMessage(content="ℹ️ No recruiter questions provided")
                 print("ℹ️ No recruiter questions provided")
 
             state["current_step"] = "recruiter_questions_handled"
+            state["messages"] = state.get("messages", []) + [new_message]
 
         except Exception as e:
             state["errors"].append(f"Recruiter questions handling error: {str(e)}")
+            error_message = AIMessage(content=f"❌ Recruiter questions handling failed: {e}")
+            state["messages"] = state.get("messages", []) + [error_message]
             print(f"❌ Recruiter questions handling failed: {e}")
 
         return state
 
-    def finalize_application_node(self, state: ApplicationState) -> ApplicationState:
+    def finalize_application_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Finalize the application process"""
         state["current_step"] = "application_completed"
+        final_message = AIMessage(content="🎉 Application processing completed with Claude AI + Pydantic validation!")
+        state["messages"] = state.get("messages", []) + [final_message]
         print("🎉 Application processing completed with Claude AI + Pydantic validation!")
         return state
 
@@ -225,8 +259,6 @@ class ResumeJobApplicationSystem:
                     "skills_used": ["string", ...],
                     "skills_learned": ["string", ...],
                     "technologies": ["string", ...],
-                    "industry": "string or null",
-                    "company_size": "string or null"
                 }}
             ],
             "education": [
@@ -286,7 +318,7 @@ class ResumeJobApplicationSystem:
         Return only the JSON object, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt, max_tokens=4000)
+        response = self._call_claude(prompt, system_prompt)
 
         try:
             # Extract JSON from response
@@ -313,7 +345,6 @@ class ResumeJobApplicationSystem:
         {{
             "company": {{
                 "name": "string",
-                "industry": "string or null",
                 "size": "string or null",
                 "location": "string or null",
                 "website": "string (URL format or null)",
@@ -347,7 +378,7 @@ class ResumeJobApplicationSystem:
         Return only the JSON object, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt, max_tokens=4000)
+        response = self._call_claude(prompt, system_prompt)
 
         try:
             json_start = response.find("{")
@@ -405,7 +436,6 @@ class ResumeJobApplicationSystem:
         JOB DETAILS:
         Position: {job.position}
         Company: {job.company.name}
-        Industry: {job.company.industry}
 
         Provide a detailed skill match analysis in this JSON format:
 
@@ -460,7 +490,7 @@ class ResumeJobApplicationSystem:
         Return only the JSON object, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt, max_tokens=4000)
+        response = self._call_claude(prompt, system_prompt)
 
         try:
             json_start = response.find("{")
@@ -507,7 +537,6 @@ class ResumeJobApplicationSystem:
         Position: {job.position}
         Company: {job.company.name}
         Location: {job.location}
-        Industry: {job.company.industry}
 
         SKILL MATCH:
         Match Score: {skill_analysis.overall_match_score:.1f}%
@@ -539,7 +568,7 @@ class ResumeJobApplicationSystem:
         Return only the JSON object, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt, max_tokens=3000)
+        response = self._call_claude(prompt, system_prompt)
 
         try:
             json_start = response.find("{")
@@ -578,7 +607,6 @@ class ResumeJobApplicationSystem:
         job_context = {
             "position": job.position,
             "company": job.company.name,
-            "industry": job.company.industry,
             "responsibilities": job.responsibilities[:3],
         }
 
@@ -616,7 +644,7 @@ class ResumeJobApplicationSystem:
         Return only the JSON array, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt, max_tokens=3000)
+        response = self._call_claude(prompt, system_prompt)
 
         try:
             json_start = response.find("[")
@@ -637,7 +665,7 @@ class ResumeJobApplicationSystem:
 
         start_time = datetime.now()
 
-        initial_state = ApplicationState(
+        initial_state = LangGraphApplicationState(
             resume_text=resume_text,
             job_description_text=job_description_text,
             parsed_resume=None,
@@ -648,6 +676,7 @@ class ResumeJobApplicationSystem:
             recruiter_answers=None,
             current_step="starting",
             errors=[],
+            messages=[],  # Initialize messages list
         )
 
         # Run the graph

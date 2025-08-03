@@ -5,15 +5,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Usage example with Pydantic validation
+# Usage example with Pydantic validation and LangGraph + Anthropic
 def main():
-    """Example usage of the Claude-powered system"""
+    """Example usage of the LangGraph + Claude-powered system"""
 
-    API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-anthropic-api-key-here")
+    # Set the API key as environment variable
+    # Make sure you have ANTHROPIC_API_KEY in your .env file
+    API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+    if not API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 
     system = ResumeJobApplicationSystem(
         api_key=API_KEY,
-        model="claude-3-sonnet-20240229",  # or "claude-3-opus-20240229" for more advanced analysis
+        model="anthropic:claude-3-5-sonnet-latest",  # Updated to use LangChain format
     )
 
     # Sample data (same as before)
@@ -88,7 +93,7 @@ def main():
     ]
 
     # Run the application process
-    print("🚀 Starting Pydantic-powered application process...")
+    print("🚀 Starting LangGraph + Claude-powered application process...")
     result = system.run_application_process(
         resume_text=sample_resume, job_description_text=sample_job_description, recruiter_questions=sample_questions
     )
@@ -116,7 +121,7 @@ def main():
     if result.cover_letter:
         print("\n📝 COVER LETTER:")
         print(f"  Word Count: {result.cover_letter.get_word_count()}")
-        print(f"  First 100 chars: {result.cover_letter.get_full_letter()}")
+        print(f"  First 100 chars: {result.cover_letter.get_full_letter()[:100]}...")
 
     if result.recruiter_answers:
         print("\n❓ RECRUITER ANSWERS:")
