@@ -17,8 +17,9 @@ from schema import (
     ApplicationResult,
 )
 
+from utils import extract_json_from_response
 
-# Updated State class for LangGraph with message handling
+
 class LangGraphApplicationState(ApplicationState):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
@@ -32,7 +33,6 @@ class ResumeJobApplicationSystem:
             api_key: Anthropic API key (set as environment variable)
             model: Claude model to use (default: anthropic:claude-3-5-sonnet-latest)
         """
-        # Initialize the LangChain Anthropic model
         self.model = init_chat_model(model, api_key=api_key, timeout=200)
         self.graph = self._build_graph()
 
@@ -40,7 +40,6 @@ class ResumeJobApplicationSystem:
         """Build the LangGraph workflow"""
         workflow = StateGraph(LangGraphApplicationState)
 
-        # Add nodes
         workflow.add_node("parse_resume", self.parse_resume_node)
         workflow.add_node("parse_job_description", self.parse_job_description_node)
         workflow.add_node("analyze_skill_match", self.analyze_skill_match_node)
@@ -48,10 +47,8 @@ class ResumeJobApplicationSystem:
         workflow.add_node("handle_recruiter_questions", self.handle_recruiter_questions_node)
         workflow.add_node("finalize_application", self.finalize_application_node)
 
-        # Set entry point
         workflow.set_entry_point("parse_resume")
 
-        # Add edges
         workflow.add_edge("parse_resume", "parse_job_description")
         workflow.add_edge("parse_job_description", "analyze_skill_match")
         workflow.add_edge("analyze_skill_match", "generate_cover_letter")
@@ -81,15 +78,18 @@ class ResumeJobApplicationSystem:
         """Parse resume text into structured Pydantic model using Claude"""
         try:
             resume_text = state["resume_text"]
-            parsed_resume = self._parse_resume_content_with_claude(resume_text)
+            core = self._parse_resume_content_with_claude(resume_text)
+            skills = self._parse_resume_skills_with_claude(resume_text)
 
-            # Validate the parsed resume
+            parsed_resume = {**core, "skills": skills}
+
+            print("Parsed resume:", parsed_resume)
+
             validated_resume = ParsedResume.model_validate(parsed_resume)
 
             state["parsed_resume"] = validated_resume
             state["current_step"] = "resume_parsed"
 
-            # Add message for tracking
             state["messages"] = [AIMessage(content="✅ Resume parsing completed with Claude AI + Pydantic validation")]
             print("✅ Resume parsing completed with Claude AI + Pydantic validation")
 
@@ -106,7 +106,6 @@ class ResumeJobApplicationSystem:
             job_desc_text = state["job_description_text"]
             parsed_job = self._parse_job_description_content_with_claude(job_desc_text)
 
-            # Validate the parsed job description
             validated_job = ParsedJobDescription.model_validate(parsed_job)
 
             state["parsed_job_description"] = validated_job
@@ -136,7 +135,6 @@ class ResumeJobApplicationSystem:
 
             skill_analysis = self._analyze_skill_matching_with_claude(resume, job)
 
-            # Validate the analysis
             validated_analysis = SkillMatchAnalysis.model_validate(skill_analysis)
 
             state["skill_match_analysis"] = validated_analysis
@@ -167,7 +165,6 @@ class ResumeJobApplicationSystem:
 
             cover_letter = self._generate_cover_letter_with_claude(resume, job, skill_analysis)
 
-            # Validate the cover letter
             validated_cover_letter = CoverLetter.model_validate(cover_letter)
 
             state["cover_letter"] = validated_cover_letter
@@ -229,8 +226,22 @@ class ResumeJobApplicationSystem:
         """Parse resume text using Claude AI into structured format"""
 
         system_prompt = """You are an expert resume parser. Extract and structure resume information into the specified JSON format. 
-        Be thorough and accurate. For skills, identify both technical and soft skills, and categorize them appropriately.
-        Track skills learned vs skills used in each job. Calculate years of experience and proficiency levels based on context."""
+        Be thorough and accurate.
+        Track skills learned vs skills used in each job.
+
+        Extract and structure the following sections into JSON:
+        - personal_info
+        - professional_summary
+        - work_experiences
+        - education
+        - certifications
+        - projects
+        - languages
+        - volunteer_experience
+        - publications
+        - awards
+        
+        IMPORTANT: Return ONLY valid JSON. No explanations, no markdown formatting, no additional text."""
 
         prompt = f"""
         Parse the following resume and extract all information into a structured JSON format that matches this schema:
@@ -274,15 +285,6 @@ class ResumeJobApplicationSystem:
                     "activities": ["string", ...]
                 }}
             ],
-            "skills": [
-                {{
-                    "name": "string",
-                    "category": "technical|soft|domain_specific|language|certification",
-                    "proficiency_level": "beginner|intermediate|advanced|expert",
-                    "years_experience": "integer or null",
-                    "context": "string or null"
-                }}
-            ],
             "certifications": [
                 {{
                     "name": "string",
@@ -319,25 +321,58 @@ class ResumeJobApplicationSystem:
         """
 
         response = self._call_claude(prompt, system_prompt)
+        return extract_json_from_response(response)
 
-        try:
-            # Extract JSON from response
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            json_str = response[json_start:json_end]
+    def _parse_resume_skills_with_claude(self, resume_text: str) -> List[Dict[str, Any]]:
+        """
+        Parse only the skills section(s) of a resume into structured JSON via Claude.
+        Identifies skills learned vs used, categorizes, infers proficiency and years.
+        """
+        system_prompt = """
+            You are an expert skills extractor. From the resume text, identify every skill mention
+            and output a JSON array of skill objects. 
+            For skills, identify both technical and soft skills, and categorize them appropriately.
+            Calculate years of experience and proficiency levels based on context.
+            For each skill, include:
+            - name
+            - category (technical|soft|domain_specific|language|certification)
+            - proficiency_level (beginner|intermediate|advanced|expert)
+            - years_experience (integer or null)
+            - context (brief phrase: e.g. “used in X project” or “learned at Y”)
 
-            parsed_data = json.loads(json_str)
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Claude response: {response}")
-            raise ValueError(f"Failed to parse Claude response as JSON: {e}")
+            IMPORTANT: Return ONLY valid JSON array. No extra text.
+            """
+
+        prompt = f"""
+            Extract all skills from this resume text and structure them as:
+
+            [
+            {{
+                "name": "string",
+                "category": "technical|soft|domain_specific|language|certification",
+                "proficiency_level": "beginner|intermediate|advanced|expert",
+                "years_experience": integer or null,
+                "context": "string or null"
+            }},
+            ...
+            ]
+
+            Resume text:
+            {resume_text}
+
+            Return only the JSON array.
+            """
+
+        response = self._call_claude(prompt, system_prompt)
+        return extract_json_from_response(response, "list")
 
     def _parse_job_description_content_with_claude(self, job_desc_text: str) -> Dict[str, Any]:
         """Parse job description using Claude AI into structured format"""
 
         system_prompt = """You are an expert job description analyzer. Extract and structure job posting information into the specified JSON format.
-        Identify requirements vs preferences, categorize skills, and extract company culture information accurately."""
+        Identify requirements vs preferences, categorize skills, and extract company culture information accurately.
+
+        IMPORTANT: Return ONLY valid JSON. No explanations, no markdown formatting, no additional text."""
 
         prompt = f"""
         Parse the following job description and extract all information into a structured JSON format:
@@ -380,17 +415,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        try:
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            json_str = response[json_start:json_end]
-
-            parsed_data = json.loads(json_str)
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Claude response: {response}")
-            raise ValueError(f"Failed to parse Claude response as JSON: {e}")
+        return extract_json_from_response(response)
 
     def _analyze_skill_matching_with_claude(self, resume: ParsedResume, job: ParsedJobDescription) -> Dict[str, Any]:
         """Analyze skill matching using Claude AI"""
@@ -398,7 +423,6 @@ class ResumeJobApplicationSystem:
         system_prompt = """You are an expert HR analyst specializing in skill matching and candidate assessment.
         Analyze how well a candidate's skills match job requirements. Provide detailed scoring and recommendations."""
 
-        # Prepare resume skills summary
         resume_skills = [
             {
                 "name": skill.name,
@@ -409,7 +433,6 @@ class ResumeJobApplicationSystem:
             for skill in resume.skills
         ]
 
-        # Prepare job requirements summary
         job_requirements = [
             {
                 "skill": req.skill,
@@ -492,95 +515,52 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        try:
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            json_str = response[json_start:json_end]
-
-            parsed_data = json.loads(json_str)
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Claude response: {response}")
-            raise ValueError(f"Failed to parse Claude response as JSON: {e}")
+        return extract_json_from_response(response)
 
     def _generate_cover_letter_with_claude(
         self, resume: ParsedResume, job: ParsedJobDescription, skill_analysis: SkillMatchAnalysis
     ) -> Dict[str, Any]:
         """Generate a tailored cover letter using Claude AI"""
 
-        system_prompt = """You are an expert career counselor and professional writer specializing in cover letters.
-        Create compelling, personalized cover letters that highlight relevant experience and demonstrate genuine interest in the role."""
+        system_prompt = """
+                You are a senior career strategist and award-winning copywriter for tech roles.
+                Your mission: craft a cover letter that
+                1. Hooks the reader by naming a product/mission insight.
+                2. Delivers a TL;DR with top achievements.
+                3. Weaves a short narrative showing impact (with metrics).
+                4. Lists core skills tied to role requirements.
+                5. Connects personal values to company culture.
+                6. Closes with a confident call to action.
+                Ensure it scans well for ATS but reads naturally.
+                """
 
-        # Prepare context
         top_skills = [
             match.requirement.skill
             for match in sorted(skill_analysis.matched_requirements, key=lambda x: x.match_strength, reverse=True)[:5]
         ]
 
-        recent_experience = resume.work_experiences[0] if resume.work_experiences else None
+        recent = resume.work_experiences[0] if resume.work_experiences else None
 
         prompt = f"""
-        Create a professional cover letter for this job application:
-
-        CANDIDATE INFO:
-        Name: {resume.personal_info.name}
-        Email: {resume.personal_info.email}
-        Phone: {resume.personal_info.phone}
-        Location: {resume.personal_info.location}
-        
-        Total Experience: {resume.get_total_experience_years()} years
-        Recent Role: {recent_experience.position if recent_experience else "N/A"} at {recent_experience.company if recent_experience else "N/A"}
-        Key Achievements: {recent_experience.achievements[:3] if recent_experience else []}
-
-        JOB DETAILS:
-        Position: {job.position}
-        Company: {job.company.name}
-        Location: {job.location}
-
-        SKILL MATCH:
-        Match Score: {skill_analysis.overall_match_score:.1f}%
-        Top Matching Skills: {top_skills}
-        Key Responsibilities: {job.responsibilities[:3]}
-
-        Generate a cover letter in this JSON format:
+        Use the SYSTEM instructions above and output EXACTLY this JSON:
 
         {{
-            "header": "string (formatted header with contact info and date)",
-            "opening_paragraph": "string (engaging opening that mentions the role and company)",
-            "body_paragraphs": [
-                "string (experience paragraph highlighting relevant background)",
-                "string (skills paragraph showcasing technical abilities)",
-                "string (value proposition paragraph explaining unique contributions)"
-            ],
-            "closing_paragraph": "string (professional closing with call to action)",
-            "signature": "string (professional sign-off with name)"
+            "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.phone} | {resume.personal_info.location}\\n{date.today().isoformat()}",
+            "tldr": "• {resume.get_total_experience_years()} yrs experience • Top skills: {", ".join(top_skills)} • Recent: {recent.position if recent else "N/A"} at {recent.company if recent else "N/A"}",
+            "opening": "2-3 sentences. Start with a specific compliment or insight about {job.company.name}. Mention the {job.position} role by name.",
+            "story_paragraph": "3-4 sentences. Describe a past project where you delivered X (metric) that maps directly to a core responsibility: {job.responsibilities[0]}.",
+            "skills_paragraph": "3-4 sentences. Call out your top 3–5 skills ({", ".join(top_skills)}) and how each will solve a key challenge for {job.company.name}. Include one numeric result per skill.",
+            "culture_fit": "2-3 sentences. Explain why {job.company.name}’s mission or values resonate with your career goals.",
+            "closing": "2 sentences. Express enthusiasm, request next steps, and thank the reader.",
+            "signature": "Best regards, {resume.personal_info.name}"
         }}
 
-        Make the cover letter:
-        - Professional yet engaging
-        - Specific to this role and company
-        - Highlighting the strongest skill matches
-        - Demonstrating knowledge of the industry/company
-        - 300-400 words total
-        - ATS-friendly formatting
-
-        Return only the JSON object, no additional text.
+        Length: ~350 words total. No extra keys or commentary—only the JSON above.
         """
 
         response = self._call_claude(prompt, system_prompt)
 
-        try:
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            json_str = response[json_start:json_end]
-
-            parsed_data = json.loads(json_str)
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Claude response: {response}")
-            raise ValueError(f"Failed to parse Claude response as JSON: {e}")
+        return extract_json_from_response(response)
 
     def _answer_recruiter_questions_with_claude(
         self, resume: ParsedResume, job: ParsedJobDescription, questions: List[str]
@@ -590,7 +570,6 @@ class ResumeJobApplicationSystem:
         system_prompt = """You are an expert interview coach and career counselor. 
         Generate thoughtful, professional answers to recruiter questions based on the candidate's background and the specific job opportunity."""
 
-        # Prepare candidate context
         candidate_context = {
             "name": resume.personal_info.name,
             "total_experience": resume.get_total_experience_years(),
@@ -646,17 +625,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        try:
-            json_start = response.find("[")
-            json_end = response.rfind("]") + 1
-            json_str = response[json_start:json_end]
-
-            parsed_data = json.loads(json_str)
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Claude response: {response}")
-            raise ValueError(f"Failed to parse Claude response as JSON: {e}")
+        return extract_json_from_response(response, type="list")
 
     def run_application_process(
         self, resume_text: str, job_description_text: str, recruiter_questions: Optional[List[str]] = None
