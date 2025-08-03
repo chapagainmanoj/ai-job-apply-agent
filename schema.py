@@ -183,7 +183,7 @@ class CompanyInfo(BaseModel):
 class ParsedJobDescription(BaseModel):
     company: CompanyInfo = Field(..., description="Company information")
     position: str = Field(..., description="Job position title")
-    location: str = Field(..., description="Job location")
+    location: Optional[str] = Field(..., description="Job location")
     job_type: JobType = Field(..., description="Employment type")
     salary_range: Optional[str] = Field(None, description="Salary range")
     remote_options: bool = Field(False, description="Remote work available")
@@ -230,15 +230,20 @@ class SkillMatchAnalysis(BaseModel):
 
 class CoverLetter(BaseModel):
     header: str = Field(..., description="Cover letter header")
-    opening_paragraph: str = Field(..., description="Opening paragraph")
-    body_paragraphs: List[str] = Field(..., description="Body paragraphs")
-    closing_paragraph: str = Field(..., description="Closing paragraph")
+    tldr: str = Field(..., description="TL;DR")
+    opening: str = Field(..., description="Opening paragraph")
+    story_paragraph: str = Field(..., description="Story paragraph")
+    skills_paragraph: str = Field(..., description="Skills paragraph")
+    culture_fit: str = Field(..., description="Culture fit paragraph")
+    closing: str = Field(..., description="Closing paragraph")
     signature: str = Field(..., description="Letter signature")
 
     def get_full_letter(self) -> str:
         """Get the complete cover letter"""
-        body = "\n\n".join(self.body_paragraphs)
-        return f"{self.header}\n\n{self.opening_paragraph}\n\n{body}\n\n{self.closing_paragraph}\n\n{self.signature}"
+
+        return f"{self.header}\n\n{self.opening}\n\n{self.story_paragraph}\n\n\
+            {self.skills_paragraph}\n\n{self.culture_fit}\n\n{self.closing}\n\n\
+            {self.signature}"
 
     def get_word_count(self) -> int:
         """Get word count of the cover letter"""

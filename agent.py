@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain.chat_models import init_chat_model
 from langgraph.graph.message import add_messages
-from datetime import datetime
+from datetime import datetime, date
 
 from schema import (
     ApplicationState,
@@ -220,10 +220,11 @@ class ResumeJobApplicationSystem:
 
     def _parse_resume_content_with_claude(self, resume_text: str) -> Dict[str, Any]:
         """Parse resume text using Claude AI into structured format"""
-
-        system_prompt = """You are an expert resume parser. Extract and structure resume information into the specified JSON format. 
+        today = date.today().isoformat()
+        system_prompt = f"""You are an expert resume parser. Extract and structure resume information into the specified JSON format. 
         Be thorough and accurate.
         Track skills learned vs skills used in each job.
+        For work experience, if end date is Present, then end date is {today}.
 
         Extract and structure the following sections into JSON:
         - personal_info
@@ -439,7 +440,7 @@ class ResumeJobApplicationSystem:
             for req in job.requirements
         ]
 
-        prompt = f"""
+        scoring_prompt = f"""
         Analyze the skill match between this candidate's resume and job requirements:
 
         CANDIDATE SKILLS:
@@ -502,16 +503,35 @@ class ResumeJobApplicationSystem:
                     "proficiency_level": "beginner|intermediate|advanced|expert",
                     "years_experience": "integer or null"
                 }}
-            ],
-            "recommendations": ["string", ...]
+            ]
         }}
 
         Return only the JSON object, no additional text.
         """
 
-        response = self._call_claude(prompt, system_prompt)
+        scoring_response = self._call_claude(scoring_prompt, system_prompt)
+        scoring_data = extract_dict_from_json_response(scoring_response)
 
-        return extract_dict_from_json_response(response)
+        recommendation_prompt = f"""
+        Based on the following skill match analysis:
+
+        {json.dumps(scoring_data, indent=2)}
+
+        Provide a list of recommendations (as an array of strings) to help the candidate improve their fit for the job.
+        
+        Return in this JSON format:
+        {{
+            "recommendations": ["string", ...]
+        }}
+        """
+
+        recommendation_response = self._call_claude(recommendation_prompt, system_prompt)
+        recommendation_data = extract_dict_from_json_response(recommendation_response)
+
+        return {
+            **scoring_data,
+            **recommendation_data,
+        }
 
     def _generate_cover_letter_with_claude(
         self, resume: ParsedResume, job: ParsedJobDescription, skill_analysis: SkillMatchAnalysis
@@ -537,21 +557,23 @@ class ResumeJobApplicationSystem:
 
         recent = resume.work_experiences[0] if resume.work_experiences else None
 
+        today = date.today().isoformat()
+
         prompt = f"""
         Use the SYSTEM instructions above and output EXACTLY this JSON:
 
         {{
-            "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.location}\\n{date.today().isoformat()}",
+            "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.location}\\n{today}",
             "tldr": "• {resume.get_total_experience_years()} yrs experience • Top skills: {", ".join(top_skills)} • Recent: {recent.position if recent else "N/A"} at {recent.company if recent else "N/A"}",
             "opening": "2-3 sentences. Start with a specific compliment or insight about {job.company.name}. Mention the {job.position} role by name.",
             "story_paragraph": "3-4 sentences. Describe a past project where you delivered X (metric) that maps directly to a core responsibility: {job.responsibilities[0]}.",
-            "skills_paragraph": "3-4 sentences. Call out your top 3–5 skills ({", ".join(top_skills)}) and how each will solve a key challenge for {job.company.name}. Include one numeric result per skill.",
-            "culture_fit": "2-3 sentences. Explain why {job.company.name}’s mission or values resonate with your career goals.",
+            "skills_paragraph": "3-4 sentences. Call out your top 3-5 skills ({", ".join(top_skills)}) and how each will solve a key challenge for {job.company.name}. Include one numeric result per skill.",
+            "culture_fit": "2-3 sentences. Explain why {job.company.name}'s mission or values resonate with your career goals.",
             "closing": "2 sentences. Express enthusiasm, request next steps, and thank the reader.",
-            "signature": "Best regards, {resume.personal_info.name}"
+            "signature": "Best regards,\n{resume.personal_info.name}"
         }}
 
-        Length: ~350 words total. No extra keys or commentary—only the JSON above.
+        Length: ~350 words total. No extra keys or commentary, only the JSON above.
         """
 
         response = self._call_claude(prompt, system_prompt)
