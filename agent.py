@@ -1,4 +1,3 @@
-import re
 import json
 from typing import Dict, List, Any, Optional, Annotated, Sequence
 from langgraph.graph import StateGraph, END
@@ -17,7 +16,7 @@ from schema import (
     ApplicationResult,
 )
 
-from utils import extract_json_from_response
+from utils import extract_dict_from_json_response
 
 
 class LangGraphApplicationState(ApplicationState):
@@ -80,10 +79,7 @@ class ResumeJobApplicationSystem:
             resume_text = state["resume_text"]
             core = self._parse_resume_content_with_claude(resume_text)
             skills = self._parse_resume_skills_with_claude(resume_text)
-
             parsed_resume = {**core, "skills": skills}
-
-            print("Parsed resume:", parsed_resume)
 
             validated_resume = ParsedResume.model_validate(parsed_resume)
 
@@ -250,7 +246,6 @@ class ResumeJobApplicationSystem:
             "personal_info": {{
                 "name": "string",
                 "email": "string (email format or null)",
-                "phone": "string or null",
                 "location": "string or null",
                 "linkedin_url": "string (URL format or null)",
                 "portfolio_url": "string (URL format or null)"
@@ -321,7 +316,7 @@ class ResumeJobApplicationSystem:
         """
 
         response = self._call_claude(prompt, system_prompt)
-        return extract_json_from_response(response)
+        return extract_dict_from_json_response(response)
 
     def _parse_resume_skills_with_claude(self, resume_text: str) -> List[Dict[str, Any]]:
         """
@@ -329,8 +324,9 @@ class ResumeJobApplicationSystem:
         Identifies skills learned vs used, categorizes, infers proficiency and years.
         """
         system_prompt = """
-            You are an expert skills extractor. From the resume text, identify every skill mention
-            and output a JSON array of skill objects. 
+            You are an expert skills extractor. From the resume text, identify relevant skill mentioned
+            and output a JSON array of skill objects.
+            For now only extract maximum of 15 skills based on context and relevancy.
             For skills, identify both technical and soft skills, and categorize them appropriately.
             Calculate years of experience and proficiency levels based on context.
             For each skill, include:
@@ -364,7 +360,7 @@ class ResumeJobApplicationSystem:
             """
 
         response = self._call_claude(prompt, system_prompt)
-        return extract_json_from_response(response, "list")
+        return extract_dict_from_json_response(response, "list")
 
     def _parse_job_description_content_with_claude(self, job_desc_text: str) -> Dict[str, Any]:
         """Parse job description using Claude AI into structured format"""
@@ -415,7 +411,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        return extract_json_from_response(response)
+        return extract_dict_from_json_response(response)
 
     def _analyze_skill_matching_with_claude(self, resume: ParsedResume, job: ParsedJobDescription) -> Dict[str, Any]:
         """Analyze skill matching using Claude AI"""
@@ -515,7 +511,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        return extract_json_from_response(response)
+        return extract_dict_from_json_response(response)
 
     def _generate_cover_letter_with_claude(
         self, resume: ParsedResume, job: ParsedJobDescription, skill_analysis: SkillMatchAnalysis
@@ -545,7 +541,7 @@ class ResumeJobApplicationSystem:
         Use the SYSTEM instructions above and output EXACTLY this JSON:
 
         {{
-            "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.phone} | {resume.personal_info.location}\\n{date.today().isoformat()}",
+            "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.location}\\n{date.today().isoformat()}",
             "tldr": "• {resume.get_total_experience_years()} yrs experience • Top skills: {", ".join(top_skills)} • Recent: {recent.position if recent else "N/A"} at {recent.company if recent else "N/A"}",
             "opening": "2-3 sentences. Start with a specific compliment or insight about {job.company.name}. Mention the {job.position} role by name.",
             "story_paragraph": "3-4 sentences. Describe a past project where you delivered X (metric) that maps directly to a core responsibility: {job.responsibilities[0]}.",
@@ -560,7 +556,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        return extract_json_from_response(response)
+        return extract_dict_from_json_response(response)
 
     def _answer_recruiter_questions_with_claude(
         self, resume: ParsedResume, job: ParsedJobDescription, questions: List[str]
@@ -625,7 +621,7 @@ class ResumeJobApplicationSystem:
 
         response = self._call_claude(prompt, system_prompt)
 
-        return extract_json_from_response(response, type="list")
+        return extract_dict_from_json_response(response, type="list")
 
     def run_application_process(
         self, resume_text: str, job_description_text: str, recruiter_questions: Optional[List[str]] = None

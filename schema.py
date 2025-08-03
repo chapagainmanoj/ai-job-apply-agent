@@ -1,8 +1,7 @@
-import re
 from enum import Enum
 from datetime import date
 from typing import Literal, Optional, List, Dict, Any, TypedDict, Annotated, Sequence
-from pydantic import BaseModel, Field, field_validator, EmailStr, HttpUrl
+from pydantic import BaseModel, Field, field_validator, ValidationInfo, EmailStr, HttpUrl
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
@@ -50,16 +49,9 @@ class EducationLevel(str, Enum):
 class PersonalInfo(BaseModel):
     name: str = Field(..., description="Full name")
     email: Optional[EmailStr] = Field(None, description="Email address")
-    phone: Optional[str] = Field(None, description="Phone number")
     location: Optional[str] = Field(None, description="Current location")
     linkedin_url: Optional[HttpUrl] = Field(None, description="LinkedIn profile URL")
     portfolio_url: Optional[HttpUrl] = Field(None, description="Portfolio website URL")
-
-    @field_validator("phone")
-    def validate_phone(cls, v):
-        if v and not re.match(r"^[\+]?[\d\s\-\(\)\.]{10,}$", v):
-            raise ValueError("Invalid phone number format")
-        return v
 
 
 class Skill(BaseModel):
@@ -88,15 +80,15 @@ class WorkExperience(BaseModel):
     skills_learned: List[str] = Field(default_factory=list, description="Skills acquired in role")
     technologies: List[str] = Field(default_factory=list, description="Technologies used")
 
-    @field_validator("end_date")
-    def validate_end_date(cls, v, values):
-        if v.lower() not in ["present", "current"] and "start_date" in values:
-            # Add date validation logic here
-            pass
-        return v
+    # @field_validator("end_date")
+    # @classmethod
+    # def validate_end_date(cls, v, info: ValidationInfo):
+    #     if v == "Present":
+    #         return v
+    #     return date.fromisoformat(v)
 
-    class Config:
-        use_enum_values = True
+    # class Config:
+    #     use_enum_values = True
 
 
 class Education(BaseModel):

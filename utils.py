@@ -2,7 +2,7 @@ from typing import Literal
 import json
 
 
-def extract_json_from_response(response: str, type: Literal["object", "list"] = "object"):
+def extract_dict_from_json_response(response: str, type: Literal["object", "list"] = "object") -> dict:
     try:
         if type == "object":
             json_start = response.find("{")
