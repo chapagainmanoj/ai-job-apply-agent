@@ -68,16 +68,6 @@ Edit the sample data in `main.py`:
 
 Get your API key from [Anthropic Console](https://console.anthropic.com/) and add it to your `.env` file.
 
-## Project Structure
-
-```
-jobcopilot/
-├── main.py           # Main application entry point
-├── agent.py          # Core AI agent system
-├── .env             # Environment variables
-└── README.md        # This file
-```
-
 ---
 
 ## TODO & Roadmap 📋
