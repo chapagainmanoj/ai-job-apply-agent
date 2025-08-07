@@ -32,7 +32,7 @@ class ResumeJobApplicationSystem:
             api_key: Anthropic API key (set as environment variable)
             model: Claude model to use (default: anthropic:claude-3-5-sonnet-latest)
         """
-        self.model = init_chat_model(model, api_key=api_key, timeout=200)
+        self.model = init_chat_model(model, api_key=api_key, max_tokens=2048, timeout=200)
         self.graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:

@@ -53,6 +53,13 @@ class PersonalInfo(BaseModel):
     linkedin_url: Optional[HttpUrl] = Field(None, description="LinkedIn profile URL")
     portfolio_url: Optional[HttpUrl] = Field(None, description="Portfolio website URL")
 
+    @field_validator("linkedin_url", "portfolio_url", mode="before")
+    @classmethod
+    def ensure_http(cls, v):
+        if v and not v.startswith(("http://", "https://")):
+            return "https://" + v
+        return v
+
 
 class Skill(BaseModel):
     name: str = Field(..., description="Skill name")
@@ -241,9 +248,9 @@ class CoverLetter(BaseModel):
     def get_full_letter(self) -> str:
         """Get the complete cover letter"""
 
-        return f"{self.header}\n\n{self.opening}\n\n{self.story_paragraph}\n\n\
+        return f"\n{self.header}\n\n{self.tldr}\n\n{self.opening}\n\n{self.story_paragraph}\n\n\
             {self.skills_paragraph}\n\n{self.culture_fit}\n\n{self.closing}\n\n\
-            {self.signature}"
+            {self.signature}\n"
 
     def get_word_count(self) -> int:
         """Get word count of the cover letter"""
