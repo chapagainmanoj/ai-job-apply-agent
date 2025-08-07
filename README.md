@@ -13,8 +13,8 @@ AI-powered job application assistant that generates tailored cover letters, answ
 
 1. **Clone the repository:**
    ```bash
-   git clone <your-repo-url>
-   cd jobcopilot
+   git clone git@github.com:chapagainmanoj/ai-job-apply-agent.git
+   cd ai-job-apply-agent
    ```
 
 2. **Install dependencies with UV:**
