@@ -79,8 +79,7 @@ Get your API key from [Anthropic Console](https://console.anthropic.com/) and ad
 - [ ] **Database Integration** - SQLite/PostgreSQL for storing applications
 - [ ] **Resume Templates** - Multiple professional resume templates
 - [ ] **Application History** - Track and manage past applications
-- [ ] **LinkedIn Integration** - Auto-apply through LinkedIn API
-- [ ] **LinkedIn and Other Job Board APIs** - Auto-apply through API integration - LinkedIn  , Indeed, Glassdoor, Wellfound
+- [ ] **LinkedIn and Other Job Board APIs** - Auto-apply through API integration - LinkedIn, Indeed, Glassdoor, Wellfound
 
 
 **Built with:** Claude AI • LangGraph • Python • UV
